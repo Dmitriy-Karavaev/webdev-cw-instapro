@@ -1,4 +1,4 @@
-import { getPosts } from "./api.js";
+import { getPosts, uploadImage, addPost, likePost } from "./api.js";
 import { renderAddPostPageComponent } from "./components/add-post-page-component.js";
 import { renderAuthPageComponent } from "./components/auth-page-component.js";
 import {
@@ -16,6 +16,41 @@ import {
   saveUserToLocalStorage,
 } from "./helpers.js";
 
+// ===== РЕЗЕРВНЫЕ ДАННЫЕ: включаются, если API недоступен =====
+const mockPosts = [
+  {
+    id: 1,
+    createdAt: Date.now(),
+    description: "Тестовый пост (мок)",
+    imageUrl: "./assets/images/post1.jpg",
+    user: {
+      id: 1,
+      name: "Admin",
+      imageUrl: "./assets/images/avatar1.jpg",
+    },
+    likes: [],
+  },
+  {
+    id: 2,
+    createdAt: Date.now() - 86400000,
+    description: "Второй тестовый пост (мок)",
+    imageUrl: "./assets/images/post2.jpg",
+    user: {
+      id: 2,
+      name: "Пользователь",
+      imageUrl: "./assets/images/avatar2.jpg",
+    },
+    likes: [],
+  },
+];
+
+const loadPosts = ({ token }) => {
+  return getPosts({ token }).catch((error) => {
+    console.warn("API недоступен, показываю мок-данные:", error.message);
+    return mockPosts;
+  });
+};
+
 export let user = getUserFromLocalStorage();
 export let page = null;
 export let posts = [];
@@ -31,9 +66,6 @@ export const logout = () => {
   goToPage(POSTS_PAGE);
 };
 
-/**
- * Включает страницу приложения
- */
 export const goToPage = (newPage, data) => {
   if (
     [
@@ -54,7 +86,7 @@ export const goToPage = (newPage, data) => {
       page = LOADING_PAGE;
       renderApp();
 
-      return getPosts({ token: getToken() })
+      return loadPosts({ token: getToken() })
         .then((newPosts) => {
           page = POSTS_PAGE;
           posts = newPosts;
@@ -67,7 +99,7 @@ export const goToPage = (newPage, data) => {
     }
 
     if (newPage === USER_POSTS_PAGE) {
-      // @@TODO: реализовать получение постов юзера из API
+      // @@TODO: реализую получение постов юзера из API
       console.log("Открываю страницу пользователя: ", data.userId);
       page = USER_POSTS_PAGE;
       posts = [];
@@ -109,10 +141,34 @@ const renderApp = () => {
   if (page === ADD_POSTS_PAGE) {
     return renderAddPostPageComponent({
       appEl,
-      onAddPostClick({ description, imageUrl }) {
-        // @TODO: реализовать добавление поста в API
-        console.log("Добавляю пост...", { description, imageUrl });
-        goToPage(POSTS_PAGE);
+      user,
+      goToPage,
+      onAddPostClick({ description, file }) {
+        if (!file || !description) {
+          alert("Добавьте фото и описание");
+          return;
+        }
+
+        page = LOADING_PAGE;
+        renderApp();
+
+        uploadImage({ file })
+          .then((data) => {
+            return addPost({
+              description,
+              imageUrl: data.fileUrl,
+              token: getToken(),
+            });
+          })
+          .then(() => {
+            goToPage(POSTS_PAGE);
+          })
+          .catch((error) => {
+            console.error(error);
+            alert(error.message);
+            page = ADD_POSTS_PAGE;
+            renderApp();
+          });
       },
     });
   }
@@ -120,6 +176,25 @@ const renderApp = () => {
   if (page === POSTS_PAGE) {
     return renderPostsPageComponent({
       appEl,
+      posts,
+      user,
+      goToPage,
+      onLikeClick({ postId }) {
+        if (!user) {
+          alert("Чтобы лайкать, нужно войти");
+          return;
+        }
+
+        likePost({ postId, token: getToken() })
+          .then(() => {
+            // после ответа сервера перезагружаем посты
+            goToPage(POSTS_PAGE);
+          })
+          .catch((error) => {
+            console.error(error);
+            alert(error.message);
+          });
+      },
     });
   }
 
